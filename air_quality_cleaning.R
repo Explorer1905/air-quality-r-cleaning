@@ -1,0 +1,193 @@
+setwd("C:/Users/Shravani/Desktop/R_Prog")
+
+install.packages("ggplot2")
+install.packages("reshape2")
+
+library(ggplot2)
+library(reshape2)
+
+file_name <- "PRSA_Data_Aotizhongxin_20130301-20170228.csv"
+
+air_data <- tryCatch({
+  read.csv(file_name, stringsAsFactors = FALSE)
+}, warning = function(w) {
+  message("Warning while reading file: ", w$message)
+  return(NULL)
+}, error = function(e) {
+  message("Error: File not found, unreadable, or incorrect format.")
+  message("Details: ", e$message)
+  return(NULL)
+})
+
+if (!is.null(air_data)) {
+  head(air_data)
+  str(air_data)
+  cat("Rows:", nrow(air_data), " Columns:", ncol(air_data), "\n")
+  cat("Any missing values?", anyNA(air_data), "\n")
+  cat("Total missing values:", sum(is.na(air_data)), "\n")
+}
+
+# NA
+temperature <- c(28, 30, NA, 32)
+print(is.na(temperature))
+
+# NULL
+missing_object <- NULL
+print(is.null(missing_object))
+
+# NaN
+undefined_value <- 0 / 0
+print(is.nan(undefined_value))
+
+cat("NA -> missing observation | NULL -> empty object | NaN -> undefined numeric result\n")
+
+missing_summary <- function(df, variables) {
+  result <- data.frame(Variable = character(),
+                       Total_Records = integer(),
+                       Missing_Values = integer(),
+                       Missing_Percentage = numeric(),
+                       stringsAsFactors = FALSE)
+  
+  for (v in variables) {
+    if (v %in% names(df)) {
+      total <- nrow(df)
+      miss <- sum(is.na(df[[v]]))
+      pct <- round((miss / total) * 100, 2)
+      
+      if (pct > 20) {
+        warning(paste("Variable", v, "has more than 20% missing values (", pct, "%)"))
+      }
+      
+      result <- rbind(result, data.frame(Variable = v,
+                                         Total_Records = total,
+                                         Missing_Values = miss,
+                                         Missing_Percentage = pct))
+    } else {
+      message("Column not found: ", v)
+    }
+  }
+  return(result)
+}
+
+selected_vars <- c("PM2.5", "PM10", "SO2", "NO2", "TEMP", "WSPM", "wd")
+summary_before <- missing_summary(air_data, selected_vars)
+print(summary_before)
+
+air_data$pollution_ratio <- air_data$PM2.5 / air_data$PM10
+
+cat("NA count:", sum(is.na(air_data$pollution_ratio)), "\n")
+cat("NaN count:", sum(is.nan(air_data$pollution_ratio)), "\n")
+cat("Infinite count:", sum(is.infinite(air_data$pollution_ratio)), "\n")
+
+air_data$pollution_ratio[is.nan(air_data$pollution_ratio) |
+                           is.infinite(air_data$pollution_ratio)] <- NA
+
+air_data$pollution_ratio[is.nan(air_data$pollution_ratio) |
+                           is.infinite(air_data$pollution_ratio)] <- NA
+
+numeric_variables <- c("PM2.5", "PM10", "SO2", "NO2", "TEMP", "WSPM")
+missing_before_num <- c()
+missing_after_num <- c()
+
+for (var in numeric_variables) {
+  if (var %in% names(air_data)) {
+    miss_before <- sum(is.na(air_data[[var]]))
+    med_value <- median(air_data[[var]], na.rm = TRUE)
+    air_data[[var]][is.na(air_data[[var]])] <- med_value
+    miss_after <- sum(is.na(air_data[[var]]))
+    
+    missing_before_num[var] <- miss_before
+    missing_after_num[var] <- miss_after
+    
+    cat("Variable:", var,
+        "| Missing before:", miss_before,
+        "| Median used:", round(med_value, 2),
+        "| Missing after:", miss_after, "\n")
+  } else {
+    message("Column does not exist: ", var)
+  }
+}
+
+calculate_mode <- function(x) {
+  x <- x[!is.na(x)]
+  freq_table <- table(x)
+  mode_value <- names(freq_table)[which.max(freq_table)]
+  return(mode_value)
+}
+
+miss_wd_before <- sum(is.na(air_data$wd))
+wd_mode <- calculate_mode(air_data$wd)
+air_data$wd[is.na(air_data$wd)] <- wd_mode
+miss_wd_after <- sum(is.na(air_data$wd))
+
+cat("wd - Mode:", wd_mode,
+    "| Missing before:", miss_wd_before,
+    "| Missing after:", miss_wd_after, "\n")
+
+clean_variable <- function(df, var_name) {
+  result <- tryCatch({
+    if (!(var_name %in% names(df))) {
+      stop(paste("Variable", var_name, "does not exist in the dataset."))
+    }
+    
+    variable <- df[[var_name]]
+    
+    if (!is.numeric(variable)) {
+      stop(paste(var_name, "is categorical, not numerical."))
+    }
+    
+    if (all(is.na(variable))) {
+      stop(paste(var_name, "contains only missing values."))
+    }
+    
+    med_val <- median(variable, na.rm = TRUE)
+    
+    if (is.na(med_val)) {
+      stop(paste("Median could not be calculated for", var_name))
+    }
+    
+    variable[is.na(variable)] <- med_val
+    return(variable)
+    
+  }, error = function(e) {
+    message("clean_variable() error: ", e$message)
+    return(NULL)
+  })
+  
+  return(result)
+}
+
+# Test 1: normal numeric variable (should work fine since CO still has its original NAs, if any)
+air_data$CO <- clean_variable(air_data, "CO")
+
+# Test 2: intentionally trigger error handling (categorical variable)
+test_result <- clean_variable(air_data, "wd")
+
+# Test 3: intentionally trigger error handling (variable doesn't exist)
+test_result2 <- clean_variable(air_data, "Ozone_Level")
+
+missing_after_wd <- sum(is.na(air_data$wd))
+
+comparison_table <- data.frame(
+  Variable = c(numeric_variables, "wd"),
+  Missing_Before = c(missing_before_num, miss_wd_before),
+  Missing_After = c(missing_after_num, missing_after_wd)
+)
+comparison_table$Values_Replaced <- comparison_table$Missing_Before - comparison_table$Missing_After
+
+print(comparison_table)
+
+rownames(comparison_table) <- NULL
+print(comparison_table)
+plot_data <- melt(comparison_table[, c("Variable", "Missing_Before", "Missing_After")],
+                  id.vars = "Variable")
+
+ggplot(plot_data, aes(x = Variable, y = value, fill = variable)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Missing Values Before vs After Cleaning",
+       x = "Variable", y = "Number of Missing Values",
+       fill = "Stage") +
+  theme_minimal()
+
+write.csv(air_data, "cleaned_air_quality_data.csv", row.names = FALSE)
+cat("Cleaned dataset exported successfully.\n")
